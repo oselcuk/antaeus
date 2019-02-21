@@ -24,6 +24,7 @@ fun ResultRow.toCustomer(): Customer = Customer(
 )
 
 fun ResultRow.toBillingCycle(): BillingCycle = BillingCycle(
-    scheduledDate = this[BillingCycleTable.scheduledDate],
-    status = InvoiceStatus.valueOf(this[BillingCycleTable.status])
+    scheduledOn = this[BillingCycleTable.scheduledOn],
+    scheduledFor = this[BillingCycleTable.scheduledFor],
+    fulfilledOn = this[BillingCycleTable.fulfilledOn]
 )

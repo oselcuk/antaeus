@@ -3,7 +3,6 @@ package io.pleo.antaeus.core.services
 import io.pleo.antaeus.core.external.PaymentProvider
 import io.pleo.antaeus.data.AntaeusDal
 import io.pleo.antaeus.models.BillingCycle
-import io.pleo.antaeus.models.InvoiceStatus
 import org.joda.time.DateTime
 import java.util.*
 import kotlin.concurrent.schedule
@@ -25,29 +24,39 @@ class BillingService(
 ) {
     private val timer: Timer = Timer()
 
-    private fun scheduleNextBilling() {
-        var nextCycle = dal.fetchLatestBillingCycle()
-        if (nextCycle?.status != InvoiceStatus.PENDING) {
-            val nextDate = scheduler(
-                    nextCycle?.scheduledDate ?: DateTime(0)
-            )
-            nextCycle = dal.createBillingCycle(nextDate)
-        }
-        timer.schedule(nextCycle.scheduledDate.toDate()) {checkSchedule()}
-    }
-
-    private fun billCustomers(billingCycle: BillingCycle) {
-        println("Billing customers on ${billingCycle.scheduledDate}")
-        dal.finalizeBillingCycleOnDate(billingCycle.scheduledDate)
-    }
-
     fun checkSchedule() {
-        println("Checking schedule on ${DateTime.now()}")
-        val nextCycle = dal.fetchLatestBillingCycle()
-        if (nextCycle?.status == InvoiceStatus.PENDING
-                && nextCycle.scheduledDate.isBeforeNow) {
-            billCustomers(nextCycle)
+        log("Checking schedule")
+        val cycle = dal.fetchCurrentBillingCycle()
+        if (cycle != null) {
+            billCustomers(cycle)
         }
-        scheduleNextBilling()
+        scheduleNextBilling(cycle)
+    }
+
+    fun fetchAllStringify(): List<Any> {
+        return dal.fetchBillingCycles().map { cycle -> object {
+            val scheduledOn = cycle.scheduledOn.toString()
+            val scheduledFor = cycle.scheduledFor.toString()
+            val fulfilledOn = cycle.fulfilledOn.toString()
+        } }
+    }
+
+    private fun billCustomers(cycle: BillingCycle) {
+        log("Billing customers scheduled for ${cycle.scheduledFor}")
+        dal.finalizeBillingCycleForDate(cycle.scheduledFor)
+    }
+
+    private fun scheduleNextBilling(currentCycle: BillingCycle?) {
+        var nextDate = dal.fetchCurrentBillingCycle()?.scheduledFor
+        if (nextDate == null) {
+            nextDate = scheduler(currentCycle?.scheduledFor ?: DateTime(0))
+            dal.createBillingCycleFor(nextDate)
+        }
+        log("Scheduling next billing for $nextDate")
+        timer.schedule(nextDate.toDate()) {checkSchedule()}
+    }
+
+    private fun log(s: String) {
+        println("BILLING_LOG-${DateTime.now().toLocalTime()}: $s")
     }
 }

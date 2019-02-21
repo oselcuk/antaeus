@@ -21,6 +21,7 @@ object CustomerTable : Table() {
 }
 
 object BillingCycleTable : Table() {
-    val scheduledDate = datetime("scheduledDate").primaryKey()
-    val status = text("status")
+    val scheduledOn = datetime("scheduledOn")
+    val scheduledFor = datetime("scheduledDate").primaryKey()
+    val fulfilledOn = datetime("fulfilledOn").nullable()
 }

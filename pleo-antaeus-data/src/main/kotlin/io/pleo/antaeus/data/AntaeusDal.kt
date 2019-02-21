@@ -83,34 +83,49 @@ class AntaeusDal(private val db: Database) {
         }
     }
 
-    fun fetchLatestBillingCycle(): BillingCycle? {
+    // Returns the latest billing cycle before now if it is unfulfilled
+    // otherwise returns the earliest billing cycle after now if it is unfulfilled
+    // otherwise returns null
+    fun fetchCurrentBillingCycle(): BillingCycle? {
+        val now = DateTime.now()
         return transaction(db) {
-            BillingCycleTable
-                    .selectAll()
-                    .orderBy(BillingCycleTable.scheduledDate to false)
-                    .lastOrNull()
+            var cycle = BillingCycleTable
+                    .select {BillingCycleTable.scheduledFor.less(now)}
+                    .orderBy(BillingCycleTable.scheduledFor to false)
+                    .firstOrNull()
                     ?.toBillingCycle()
+            if (cycle == null || cycle.fulfilledOn != null) {
+                cycle = BillingCycleTable
+                        .select {BillingCycleTable.scheduledFor.greater(now)}
+                        .orderBy(BillingCycleTable.scheduledFor to true)
+                        .firstOrNull()
+                        ?.toBillingCycle()
+            }
+            if (cycle?.fulfilledOn != null) {
+                cycle = null
+            }
+            cycle
         }
     }
 
-    fun createBillingCycle(
-            scheduledDate: DateTime,
-            status: InvoiceStatus = InvoiceStatus.PENDING
-    ): BillingCycle {
+    fun createBillingCycleFor(date: DateTime): BillingCycle {
+        val now = DateTime.now()
         transaction(db) {
             BillingCycleTable.insert {
-                it[this.scheduledDate] = scheduledDate
-                it[this.status] = status.toString()
+                it[this.scheduledOn] = now
+                it[this.scheduledFor] = date
+                it[this.fulfilledOn] = null
             }
         }
-        return BillingCycle(scheduledDate, status)
+        return BillingCycle(now, date, null)
     }
 
-    fun finalizeBillingCycleOnDate(dateTime: DateTime) {
+    fun finalizeBillingCycleForDate(date: DateTime) {
+        val now = DateTime.now()
         transaction(db) {
             BillingCycleTable.update(
-                    {BillingCycleTable.scheduledDate eq dateTime}) {
-                it[BillingCycleTable.status] = InvoiceStatus.PAID.toString()
+                    {BillingCycleTable.scheduledFor.eq(date)}) {
+                it[BillingCycleTable.fulfilledOn] = now
             }
         }
     }
