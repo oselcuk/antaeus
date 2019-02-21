@@ -19,3 +19,8 @@ object CustomerTable : Table() {
     val id = integer("id").autoIncrement().primaryKey()
     val currency = varchar("currency", 3)
 }
+
+object BillingCycleTable : Table() {
+    val scheduledDate = datetime("scheduledDate").primaryKey()
+    val status = text("status")
+}

@@ -5,6 +5,7 @@ import io.pleo.antaeus.models.Currency
 import io.pleo.antaeus.models.Invoice
 import io.pleo.antaeus.models.InvoiceStatus
 import io.pleo.antaeus.models.Money
+import org.joda.time.DateTime
 import java.math.BigDecimal
 import kotlin.random.Random
 
@@ -28,6 +29,11 @@ internal fun setupInitialData(dal: AntaeusDal) {
             )
         }
     }
+
+    // Set up a billing cycle for 15 seconds from now, for testing
+    println("Setting dummy billing date on ${DateTime.now()}")
+    val date = DateTime.now().plusSeconds(15)
+    dal.createBillingCycle(date)
 }
 
 // This is the mocked instance of the payment provider

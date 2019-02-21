@@ -7,16 +7,10 @@
 
 package io.pleo.antaeus.data
 
-import io.pleo.antaeus.models.Currency
-import io.pleo.antaeus.models.Customer
-import io.pleo.antaeus.models.Invoice
-import io.pleo.antaeus.models.InvoiceStatus
-import io.pleo.antaeus.models.Money
-import org.jetbrains.exposed.sql.Database
-import org.jetbrains.exposed.sql.insert
-import org.jetbrains.exposed.sql.select
-import org.jetbrains.exposed.sql.selectAll
+import io.pleo.antaeus.models.*
+import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.transactions.transaction
+import org.joda.time.DateTime
 
 class AntaeusDal(private val db: Database) {
     fun fetchInvoice(id: Int): Invoice? {
@@ -79,5 +73,45 @@ class AntaeusDal(private val db: Database) {
         }
 
         return fetchCustomer(id!!)
+    }
+
+    fun fetchBillingCycles(): List<BillingCycle> {
+        return transaction(db) {
+            BillingCycleTable
+                    .selectAll()
+                    .map {it.toBillingCycle() }
+        }
+    }
+
+    fun fetchLatestBillingCycle(): BillingCycle? {
+        return transaction(db) {
+            BillingCycleTable
+                    .selectAll()
+                    .orderBy(BillingCycleTable.scheduledDate to false)
+                    .lastOrNull()
+                    ?.toBillingCycle()
+        }
+    }
+
+    fun createBillingCycle(
+            scheduledDate: DateTime,
+            status: InvoiceStatus = InvoiceStatus.PENDING
+    ): BillingCycle {
+        transaction(db) {
+            BillingCycleTable.insert {
+                it[this.scheduledDate] = scheduledDate
+                it[this.status] = status.toString()
+            }
+        }
+        return BillingCycle(scheduledDate, status)
+    }
+
+    fun finalizeBillingCycleOnDate(dateTime: DateTime) {
+        transaction(db) {
+            BillingCycleTable.update(
+                    {BillingCycleTable.scheduledDate eq dateTime}) {
+                it[BillingCycleTable.status] = InvoiceStatus.PAID.toString()
+            }
+        }
     }
 }

@@ -2,6 +2,8 @@ plugins {
     kotlin("jvm")
 }
 
+dataLibs()
+
 kotlinProject()
 
 dependencies {
