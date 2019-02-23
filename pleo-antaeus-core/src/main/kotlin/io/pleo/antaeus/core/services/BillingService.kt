@@ -12,6 +12,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import mu.KotlinLogging
 import org.joda.time.DateTime
 import java.util.*
 import kotlin.concurrent.schedule
@@ -19,7 +20,7 @@ import kotlin.concurrent.schedule
 
 // Takes the date/time of the last billing and returns the next
 //  date/time a billing cycle should be scheduled
-typealias Scheduler = (DateTime) -> DateTime
+typealias Scheduler = (DateTime) -> DateTime?
 
 class BillingService(
     private val paymentProvider: PaymentProvider,
@@ -33,10 +34,11 @@ class BillingService(
     },
     private val networkExceptionRetries: List<Float> = listOf(0.5f, 2f, 8f)
 ) {
-    private val timer: Timer = Timer()
+    private val timer = Timer()
+    private val logger = KotlinLogging.logger {}
 
     fun checkSchedule() {
-        log("Checking schedule")
+        logger.info { "Checking schedule" }
         val cycle = dal.fetchCurrentBillingCycle()
         if (cycle != null) {
             billCustomers(cycle)
@@ -45,6 +47,8 @@ class BillingService(
         }
     }
 
+    // The "unused" members of the anonymous type are actually used for jsonifying the billing cycles
+    @Suppress("unused")
     fun fetchAllTimestamp(): List<Any> {
         return dal.fetchBillingCycles().map { cycle -> object {
             val scheduledOn = cycle.scheduledOn.millis / 1_000
@@ -54,10 +58,10 @@ class BillingService(
     }
 
     private fun billCustomers(cycle: BillingCycle) {
-        log("Billing customers scheduled for ${cycle.scheduledFor}")
+        logger.info { "Billing customers scheduled for ${cycle.scheduledFor}" }
         val start = DateTime.now().millis
         val pendingInvoices = dal.fetchPendingInvoices()
-        log("Found ${pendingInvoices.size} pending invoices")
+        logger.info { "Found ${pendingInvoices.size} pending invoices" }
 
         val failures = runBlocking {
             coroutineScope {
@@ -68,7 +72,7 @@ class BillingService(
         }
 
         val duration = DateTime.now().millis - start
-        log("Done billing with $failures failures in ${duration/1_000f} seconds")
+        logger.info { "Done billing with $failures failures in ${duration/1_000f} seconds" }
         dal.finalizeBillingCycleForDate(cycle.scheduledFor)
         scheduleNextBilling(cycle)
     }
@@ -82,19 +86,20 @@ class BillingService(
                 break
             }
             catch (e: CustomerNotFoundException) {
-                log("CustomerNotFound: $e")
+                logger.warn(e) {"while processing $invoice"}
                 break
             }
             catch (e: CurrencyMismatchException) {
-                log("CurrencyMismatch: $e")
+                logger.warn(e) {"while processing $invoice"}
                 break
             }
             catch (e: NetworkException) {
-                log("NetworkException: $e")
                 if (retryIndex < numRetries) {
                     val waitSeconds = networkExceptionRetries[retryIndex]
-                    log("Waiting $waitSeconds seconds before retrying...")
+                    logger.debug(e) {"while processing $invoice\nWaiting $waitSeconds seconds before retrying..."}
                     delay((waitSeconds * 1_000).toLong())
+                } else {
+                    logger.warn(e) { "while processing $invoice" }
                 }
             }
         }
@@ -108,13 +113,15 @@ class BillingService(
         var nextDate = dal.fetchCurrentBillingCycle()?.scheduledFor
         if (nextDate == null) {
             nextDate = scheduler(currentCycle?.scheduledFor ?: DateTime(0))
-            dal.createBillingCycleFor(nextDate)
+            if (nextDate != null) {
+                dal.createBillingCycleFor(nextDate)
+            }
         }
-        log("Scheduling next billing for $nextDate")
-        timer.schedule(nextDate.toDate()) {checkSchedule()}
-    }
-
-    private fun log(s: String) {
-        println("BILLING_LOG-${DateTime.now().toLocalTime()}: $s")
+        if (nextDate == null) {
+            nextDate = DateTime.now().plusDays(1)
+        } else {
+            logger.info{ "Scheduling next billing for $nextDate" }
+        }
+        timer.schedule(nextDate!!.toDate()) {checkSchedule()}
     }
 }
