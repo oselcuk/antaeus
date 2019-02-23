@@ -1,8 +1,13 @@
 package io.pleo.antaeus.core.services
 
+import io.pleo.antaeus.core.exceptions.CurrencyMismatchException
+import io.pleo.antaeus.core.exceptions.CustomerNotFoundException
+import io.pleo.antaeus.core.exceptions.NetworkException
 import io.pleo.antaeus.core.external.PaymentProvider
 import io.pleo.antaeus.data.AntaeusDal
 import io.pleo.antaeus.models.BillingCycle
+import io.pleo.antaeus.models.Invoice
+import io.pleo.antaeus.models.InvoiceStatus
 import org.joda.time.DateTime
 import java.util.*
 import kotlin.concurrent.schedule
@@ -20,7 +25,8 @@ class BillingService(
                 .plusMonths(1)
                 .withDayOfMonth(1)
                 .withTimeAtStartOfDay()
-    }
+    },
+    private val networkExceptionRetries: List<Float> = listOf(0.5f, 2f, 8f)
 ) {
     private val timer: Timer = Timer()
 
@@ -29,21 +35,61 @@ class BillingService(
         val cycle = dal.fetchCurrentBillingCycle()
         if (cycle != null) {
             billCustomers(cycle)
+        } else {
+            scheduleNextBilling(cycle)
         }
-        scheduleNextBilling(cycle)
     }
 
-    fun fetchAllStringify(): List<Any> {
+    fun fetchAllTimestamp(): List<Any> {
         return dal.fetchBillingCycles().map { cycle -> object {
-            val scheduledOn = cycle.scheduledOn.toString()
-            val scheduledFor = cycle.scheduledFor.toString()
-            val fulfilledOn = cycle.fulfilledOn.toString()
+            val scheduledOn = cycle.scheduledOn.millis / 1_000
+            val scheduledFor = cycle.scheduledFor.millis / 1_000
+            val fulfilledOn = if (cycle.fulfilledOn == null) 0 else cycle.fulfilledOn!!.millis / 1_000
         } }
     }
 
     private fun billCustomers(cycle: BillingCycle) {
         log("Billing customers scheduled for ${cycle.scheduledFor}")
+        var failures = 0
+        val pendingInvoices = dal.fetchPendingInvoices()
+        log("Found ${pendingInvoices.size} pending invoices")
+        for (invoice in pendingInvoices) {
+            if (!billCustomer(invoice)) ++failures
+        }
+        log("Done billing with $failures failures")
         dal.finalizeBillingCycleForDate(cycle.scheduledFor)
+        scheduleNextBilling(cycle)
+    }
+
+    private fun billCustomer(invoice: Invoice): Boolean {
+        var success = false
+        val numRetries = networkExceptionRetries.size
+        for (retryIndex in 0..numRetries) {
+            try {
+                success = paymentProvider.charge(invoice)
+                break
+            }
+            catch (e: CustomerNotFoundException) {
+                log("CustomerNotFound: $e")
+                break
+            }
+            catch (e: CurrencyMismatchException) {
+                log("CurrencyMismatch: $e")
+                break
+            }
+            catch (e: NetworkException) {
+                log("NetworkException: $e")
+                if (retryIndex < numRetries) {
+                    val waitSeconds = networkExceptionRetries[retryIndex]
+                    log("Waiting $waitSeconds seconds before retrying...")
+                    Thread.sleep((waitSeconds * 1_000).toLong())
+                }
+            }
+        }
+        if (success) {
+            dal.setInvoiceStatus(invoice, InvoiceStatus.PAID)
+        }
+        return success
     }
 
     private fun scheduleNextBilling(currentCycle: BillingCycle?) {

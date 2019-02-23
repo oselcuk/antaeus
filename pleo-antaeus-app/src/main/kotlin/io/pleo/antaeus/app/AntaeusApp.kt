@@ -50,7 +50,7 @@ fun main() {
     setupInitialData(dal = dal)
 
     // Get third parties
-    val paymentProvider = getPaymentProvider()
+    val paymentProvider = getPaymentProvider(true)
 
     // Create core services
     val invoiceService = InvoiceService(dal = dal)

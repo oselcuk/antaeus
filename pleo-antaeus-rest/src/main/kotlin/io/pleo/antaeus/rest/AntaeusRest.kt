@@ -80,7 +80,7 @@ class AntaeusRest (
                    path("billing") {
 
                        get {
-                           it.json(billingService.fetchAllStringify())
+                           it.json(billingService.fetchAllTimestamp())
                        }
                    }
                }
