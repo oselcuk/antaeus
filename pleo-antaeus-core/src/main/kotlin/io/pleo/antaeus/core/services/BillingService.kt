@@ -8,9 +8,14 @@ import io.pleo.antaeus.data.AntaeusDal
 import io.pleo.antaeus.models.BillingCycle
 import io.pleo.antaeus.models.Invoice
 import io.pleo.antaeus.models.InvoiceStatus
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
 import org.joda.time.DateTime
 import java.util.*
 import kotlin.concurrent.schedule
+
 
 // Takes the date/time of the last billing and returns the next
 //  date/time a billing cycle should be scheduled
@@ -50,18 +55,25 @@ class BillingService(
 
     private fun billCustomers(cycle: BillingCycle) {
         log("Billing customers scheduled for ${cycle.scheduledFor}")
-        var failures = 0
+        val start = DateTime.now().millis
         val pendingInvoices = dal.fetchPendingInvoices()
         log("Found ${pendingInvoices.size} pending invoices")
-        for (invoice in pendingInvoices) {
-            if (!billCustomer(invoice)) ++failures
+
+        val failures = runBlocking {
+            coroutineScope {
+                pendingInvoices
+                        .map { async { billCustomer(it) } }
+                        .sumBy { res -> if (res.await()) 1 else 0 }
+            }
         }
-        log("Done billing with $failures failures")
+
+        val duration = DateTime.now().millis - start
+        log("Done billing with $failures failures in ${duration/1_000f} seconds")
         dal.finalizeBillingCycleForDate(cycle.scheduledFor)
         scheduleNextBilling(cycle)
     }
 
-    private fun billCustomer(invoice: Invoice): Boolean {
+    private suspend fun billCustomer(invoice: Invoice): Boolean {
         var success = false
         val numRetries = networkExceptionRetries.size
         for (retryIndex in 0..numRetries) {
@@ -82,7 +94,7 @@ class BillingService(
                 if (retryIndex < numRetries) {
                     val waitSeconds = networkExceptionRetries[retryIndex]
                     log("Waiting $waitSeconds seconds before retrying...")
-                    Thread.sleep((waitSeconds * 1_000).toLong())
+                    delay((waitSeconds * 1_000).toLong())
                 }
             }
         }
