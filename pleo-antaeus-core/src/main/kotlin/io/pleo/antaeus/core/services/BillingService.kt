@@ -67,7 +67,7 @@ class BillingService(
             coroutineScope {
                 pendingInvoices
                         .map { async { billCustomer(it) } }
-                        .sumBy { res -> if (res.await()) 1 else 0 }
+                        .sumBy { res -> if (res.await()) 0 else 1 }
             }
         }
 
